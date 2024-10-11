@@ -1,0 +1,16 @@
+---
+- name: Run `command -v {{ item }}`
+  ansible.builtin.shell: >
+    command -v {{ item }} || :
+  args:
+    executable: /usr/bin/bash
+  register: __result
+  when:
+    - __tpa_single_node_vm_emulator is undefined
+
+- name: Store the result of `command -v {{ item }}` into the fact
+  ansible.builtin.set_fact:
+    __tpa_single_node_vm_emulator: "{{ __result.stdout | trim }}"
+  when:
+    - __tpa_single_node_vm_emulator is undefined
+    - __result.stdout | trim | length > 0

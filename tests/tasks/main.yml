@@ -1,0 +1,8 @@
+---
+- name: Invoke the selected task file
+  ansible.builtin.include_tasks:
+    file: "{{ invoke + '.yml' }}"
+  when:
+    - invoke is defined
+    - invoke is string
+    - invoke | trim | length > 0

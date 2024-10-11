@@ -1,0 +1,109 @@
+#!/bin/bash
+
+if [[ -z "${Q:-}" ]]; then
+    _Q=x
+else
+    _Q=""
+fi
+
+set -eu${_Q}o pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+DELAY=5
+
+function cstatus() {
+    podman ps -a --format='{{.Names}}|{{.Status}}' \
+    | grep -Ee '^'"${1:-}"'\|' \
+    | cut -d'|' -f2 \
+    | cut -d' ' -f1
+}
+
+function cwait() {
+    local _counter=1
+    local _status
+
+    while true; do
+        echo "Waiting for ${1} to be up and running (#${_counter})"
+        _status="$(cstatus "${1}" 2>/dev/null)"
+        case "${_status}" in
+            Up | Running)
+                break
+            ;;
+            Created | Initialized)
+                sleep ${DELAY}
+            ;;
+            *)
+                echo "${1} is in ${_status:-unknown} state"
+                return 1
+            ;;
+        esac
+        _counter=$(( _counter + 1 ))
+    done
+    echo "${1} is up and running"
+}
+
+function cready() {
+    [[ "$(cstatus "${1}" 2>/dev/null)" == [UR][pu]* ]] \
+    && podman exec "${1}" true >/dev/null 2>&1
+}
+
+function play() {
+    podman exec -ti \
+        -e _Q="${_Q}" \
+        "${1}" ./tests/tools/play "${2}" "${3}"
+}
+
+function main() (
+    local _image="${1:-}"
+    local _container="${2:-}"
+    local _force="${FORCE:-0}"
+    local _test="${TEST:-}"
+    local _topdir="$(cd "${HERE}/../.." && pwd -P)"
+
+    if [[ -z "${_image}" ]]; then
+        echo "$0: Missing image name" >&2
+        return 1
+    fi
+    if [[ -z "${_container}" ]]; then
+        echo "$0: Missing container name" >&2
+        return 1
+    fi
+    if [[ "${_force}" != [012] ]]; then
+        echo "$0: FORCE must be a number from 0 to 2 inclusive" >&2
+        return 1
+    fi
+
+    mkdir -p "${HERE}/../.${_container}"
+
+    cd "${_topdir}"
+
+    if ! podman container exists "${_container}"; then
+        podman run \
+            --init \
+            -v "${PWD}:/${_topdir##*/}:Z" \
+            --name "${_container}" \
+            -d \
+            "${_image}"
+        cwait "${_container}"
+    fi
+
+    if ! cready "${_container}"; then
+        echo "${_container} is not yet ready;" \
+             "please resolve the issue and try later" >&2
+        return 1
+    fi
+
+    podman exec \
+        -ti \
+        -e _Q="${_Q}" \
+        -e FORCE="${_force}" \
+        "${_container}" \
+        ./tests/tools/setup \
+        "${_container}" \
+        "/${_topdir##*/}/tests/.${_container}"
+
+    play "${_container}" "/${_topdir##*/}/tests/.${_container}" \
+        ./tests/playbooks/setup-infra-vm.yml
+)
+
+main "$@"

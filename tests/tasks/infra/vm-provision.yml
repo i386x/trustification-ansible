@@ -1,0 +1,317 @@
+---
+# Setup and provision a virtual machine
+#
+# Task variables:
+#   vm_spec:
+#     name: Virtual machine name (required)
+#     uuid: Virtual machine UUID (optional, computed if missing)
+#     memory:
+#       unit: Memory size specification unit (optional, default 'MiB')
+#       size: Memory size in units specified above
+#     image: Path to QCOW2 image relative to the workspace directory (required)
+#     network:
+#       mac: MAC address (required)
+#       port: SSH port exposed to the host (required)
+#
+
+- name: Check that workspace is defined and it is a directory
+  block:
+    - name: Check that workspace is defined
+      ansible.builtin.assert:
+        that:
+          - tpa_single_node_tests_workspace is defined
+          - tpa_single_node_tests_workspace is string
+          - tpa_single_node_tests_workspace | trim | length > 0
+        fail_msg: >-
+          `tpa_single_node_tests_workspace` is not defined or it is not a
+          string or it is empty
+
+    - name: Get stats about workspace
+      ansible.builtin.stat:
+        path: "{{ tpa_single_node_tests_workspace | trim }}"
+      register: __result
+
+    - name: Check that workspace is a directory
+      ansible.builtin.assert:
+        that:
+          - __result.stat.isdir is defined
+          - __result.stat.isdir
+        fail_msg: >-
+          `tpa_single_node_tests_workspace` is not a directory
+
+- name: Install requirements
+  ansible.builtin.package:
+    name:
+      - qemu-system-x86-core
+      - openssh
+      - util-linux
+      - xorriso
+    state: present
+
+- name: Check that virtual machine specification is defined
+  ansible.builtin.assert:
+    that:
+      - vm_spec is defined
+      - vm_spec is mapping
+    fail_msg: >-
+      `vm_spec` (virtual machine specification) is not defined or it is not
+      a mapping
+
+- name: Check that `vm_spec.name` is defined
+  ansible.builtin.assert:
+    that:
+      - vm_spec.name is defined
+      - vm_spec.name is string
+      - vm_spec.name | trim | length > 0
+    fail_msg: >-
+      `vm_spec.name` is not defined or it is not a string or it is empty
+
+- name: Compute the path to `vm_spec.name` artifacts
+  ansible.builtin.set_fact:
+    __tpa_single_node_vm_artifacts: "{{
+      (tpa_single_node_tests_workspace | trim) + '/vm-' + (vm_spec.name | trim) }}"
+
+- name: Check `vm_spec.uuid` if it is defined
+  ansible.builtin.assert:
+    that:
+      - vm_spec.uuid is string
+      - vm_spec.uuid | trim | length > 0
+    fail_msg: >-
+      `vm_spec.uuid` is not a string or it is empty
+  when:
+    - vm_spec.uuid is defined
+
+- name: Generate `vm_spec.uuid` if it is not defined
+  ansible.builtin.set_fact:
+    __tpa_single_node_vm_uuid: "{{
+      vm_spec.uuid | d(
+        (__tpa_single_node_vm_uuid_base + vm_spec.name) | to_uuid
+      ) | trim }}"
+
+- name: Check `vm_spec.memory`
+  block:
+    - name: Check that `vm_spec.memory` is defined
+      ansible.builtin.assert:
+        that:
+          - vm_spec.memory is defined
+          - vm_spec.memory is mapping
+        fail_msg: >-
+          `vm_spec.memory` is not defined or it is not a mapping
+
+    - name: Check `vm_spec.memory.unit` if it is defined
+      ansible.builtin.assert:
+        that:
+          - vm_spec.memory.unit is string
+          - vm_spec.memory.unit | trim | length > 0
+        fail_msg: >-
+          `vm_spec.memory.unit` is not a string or it is empty
+      when:
+        - vm_spec.memory.unit is defined
+
+    - name: Check that `vm_spec.memory.size` is defined
+      ansible.builtin.assert:
+        that:
+          - vm_spec.memory.size is defined
+          - vm_spec.memory.size is integer
+          - vm_spec.memory.size > 0
+        fail_msg: >-
+          `vm_spec.memory.size` is not defined or it is not an integer or it is
+          less or equal to zero
+
+- name: Probe CPU sockets
+  block:
+    - name: Run `lscpu -b -p=SOCKET`
+      ansible.builtin.shell: |
+        set -o pipefail
+        lscpu -b -p=SOCKET | grep -Ee '^[0-9]+$' | sort | uniq | wc -l
+      args:
+        executable: /usr/bin/bash
+      register: __result
+
+    - name: Check the result of `lscpu -b -p=SOCKET`
+      ansible.builtin.assert:
+        that:
+          - __result.stdout | trim | int > 0
+        fail_msg: >-
+          No CPU sockets found
+
+    - name: Save the number of sockets into the fact
+      ansible.builtin.set_fact:
+        __tpa_single_node_vm_sockets: "{{ __result.stdout | trim | int }}"
+  when:
+    - __tpa_single_node_vm_sockets is undefined
+
+- name: Probe CPU cores per socket
+  block:
+    - name: "Run `lscpu -b -p=CORE`"
+      ansible.builtin.shell: |
+        set -o pipefail
+        lscpu -b -p=CORE | grep -Ee '^[0-9]+$' | sort | uniq | wc -l
+      args:
+        executable: /usr/bin/bash
+      register: __result
+
+    - name: Check the result of `lscpu -b -p=CORE`
+      ansible.builtin.assert:
+        that:
+          - __result.stdout | trim | int > 0
+        fail_msg: >-
+          Number of CPU cores per socket is zero
+
+    - name: Save the number of cores per socket into the fact
+      ansible.builtin.set_fact:
+        __tpa_single_node_vm_cores_per_socket: "{{ __result.stdout | trim | int }}"
+  when:
+    - __tpa_single_node_vm_cores_per_socket is undefined
+
+- name: Find a proper QEMU emulator
+  include_tasks:
+    file: find-qemu.yml
+  loop:
+    - qemu-kvm
+    - /usr/libexec/qemu-kvm
+    - /usr/bin/qemu-system-x86_64
+  when:
+    - __tpa_single_node_vm_emulator is undefined
+
+- name: Check that a proper QEMU emulator has been found
+  ansible.builtin.assert:
+    that:
+      __tpa_single_node_vm_emulator is defined
+    fail_msg: >-
+      A proper QEMU emulator is not present on the system
+
+- name: Check that `vm_spec.image` is defined
+  ansible.builtin.assert:
+    that:
+      - vm_spec.image is defined
+      - vm_spec.image is string
+      - vm_spec.image | trim | length > 0
+    fail_msg: >-
+      `vm_spec.image` is not defined or it is not a string or it is empty
+
+- name: Get `vm_spec.image` stats
+  ansible.builtin.stat:
+    path: "{{
+      (tpa_single_node_tests_workspace | trim) + '/' + (vm_spec.image | trim) }}"
+  register: __result
+
+- name: Check that `vm_spec.image` exists
+  ansible.builtin.assert:
+    that:
+      - __result.stat.isreg is defined
+      - __result.stat.isreg
+    fail_msg: >-
+      `vm_spec.image` does not exist or it is not a regular file
+
+- name: Compute the path to the cloud metadata ISO image
+  ansible.builtin.set_fact:
+    __tpa_single_node_vm_cloud_metadata_image: "{{
+      (tpa_single_node_tests_workspace | trim) + '/'
+      + __tpa_single_node_vm_cloud_metadata_dir + '/'
+      + __tpa_single_node_vm_cloud_metadata_iso }}"
+
+- name: Get `vm_spec.cloud_metadata_image` stats
+  ansible.builtin.stat:
+    path: "{{ __tpa_single_node_vm_cloud_metadata_image }}"
+  register: __stats
+
+- name: Build `vm_spec.cloud_metadata_image` if it does not exist
+  block:
+    - name: Build `vm_spec.cloud_metadata_image` if it does not exist
+      ansible.builtin.shell: |
+        set -eu${_Q}o pipefail
+        source '{{ role_path }}/files/vmutils.sh'
+        create_cloud_init_metadata_iso '{{
+          vm_spec.name }}' '{{
+          __tpa_single_node_vm_cloud_metadata_image }}' '{{
+          __tpa_single_node_vm_user }}' '{{
+          __tpa_single_node_vm_password }}'
+      args:
+        executable: /usr/bin/bash
+
+    - name: Get `vm_spec.cloud_metadata_image` stats
+      ansible.builtin.stat:
+        path: "{{ __tpa_single_node_vm_cloud_metadata_image }}"
+      register: __result
+
+    - name: Check that `vm_spec.cloud_metadata_image` has been created
+      ansible.builtin.assert:
+        that:
+          - __result.stat.isreg is defined
+          - __result.stat.isreg
+        fail_msg: >-
+          {{ __tpa_single_node_vm_cloud_metadata_image }} is not a regular file
+  when:
+    - __stats.stat.isreg is undefined or not __stats.stat.isreg
+
+- name: Check `vm_spec.network`
+  block:
+    - name: Check that `vm_spec.network` is defined
+      ansible.builtin.assert:
+        that:
+          - vm_spec.network is defined
+          - vm_spec.network is mapping
+        fail_msg: >-
+          `vm_spec.network` is not defined or it is not a mapping
+
+    - name: Check that `vm_spec.network.mac` is defined
+      ansible.builtin.assert:
+        that:
+          - vm_spec.network.mac is defined
+          - vm_spec.network.mac is string
+          - vm_spec.network.mac | trim | length > 0
+        fail_msg: >-
+          `vm_spec.network.mac` is not defined or it is not a string or it is
+          empty
+
+    - name: Compute the path to the `passt` log
+      ansible.builtin.set_fact:
+        __tpa_single_node_vm_passt_log_path: "{{
+          __tpa_single_node_vm_artifacts + '/' + __tpa_single_node_vm_passt_log }}"
+
+    - name: Check that `vm_spec.network.port` is defined
+      ansible.builtin.assert:
+        that:
+          - vm_spec.network.port is defined
+          - vm_spec.network.port is integer
+          - vm_spec.network.port >= 0
+          - vm_spec.network.port <= 65535
+        fail_msg: >-
+          `vm_spec.network.port` is not defined or it is not a valid port number
+
+- name: Compute the path to the guest serial traffic log
+  ansible.builtin.set_fact:
+    __tpa_single_node_vm_guest_log_path: "{{
+      __tpa_single_node_vm_artifacts + '/' + __tpa_single_node_vm_guest_log }}"
+
+- name: Complete the virtual machine specification
+  ansible.builtin.set_fact:
+    __vm_spec:
+      name: "{{ vm_spec.name | trim }}"
+      uuid: "{{ __tpa_single_node_vm_uuid }}"
+      memory:
+        unit: "{{ vm_spec.memory.unit | d('MiB') | trim }}"
+        size: "{{ vm_spec.memory.size }}"
+      sockets: "{{ __tpa_single_node_vm_sockets }}"
+      cores_per_socket: "{{ __tpa_single_node_vm_cores_per_socket }}"
+      threads_per_core: "{{ ansible_processor_threads_per_core }}"
+      emulator: "{{ __tpa_single_node_vm_emulator }}"
+      image: "{{
+        (tpa_single_node_tests_workspace | trim) + '/' + (vm_spec.image | trim) }}"
+      cloud_metadata_image: "{{ __tpa_single_node_vm_cloud_metadata_image }}"
+      network:
+        mac: "{{ vm_spec.network.mac | trim }}"
+        passt_log: "{{ __tpa_single_node_vm_passt_log_path }}"
+        port: "{{ vm_spec.network.port }}"
+      guest_log: "{{ __tpa_single_node_vm_guest_log_path }}"
+
+- name: Print the virtual machine specification
+  ansible.builtin.debug:
+    var: __vm_spec
+
+- name: Ensure the directory for virtual machine artifacts exists
+  ansible.builtin.file:
+    path: "{{ __tpa_single_node_vm_artifacts }}"
+    state: directory
+    mode: "0755"

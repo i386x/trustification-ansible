@@ -1,0 +1,25 @@
+---
+# Unique string that serves as a base for generating the UUID for a particular
+# virtual machine. Example of use:
+#
+#     "{{ (__tpa_single_node_vm_uuid_base + 'vm-test1') | to_uuid }}"
+#
+# See https://docs.ansible.com/ansible/latest/collections/ansible/builtin/to_uuid_filter.html
+__tpa_single_node_vm_uuid_base: "github.com/trustification/trustification-ansible/tests/"
+
+# Virtual machine user and password
+__tpa_single_node_vm_user: root
+__tpa_single_node_vm_password: admin123456
+
+# Path to the directory with the cloud-init metadata (relative to the workspace
+# directory)
+__tpa_single_node_vm_cloud_metadata_dir: "cloud"
+
+# ISO file with the cloud-init metadata
+__tpa_single_node_vm_cloud_metadata_iso: "cloud-init.iso"
+
+# `passt` log file
+__tpa_single_node_vm_passt_log: "passt.log"
+
+# Guest log file for logging serial traffic
+__tpa_single_node_vm_guest_log: "guest.log"

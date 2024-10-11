@@ -1,0 +1,6 @@
+---
+# Path to the workspace directory
+tpa_single_node_tests_workspace: ""
+
+# Task to be executed (a task file without .yml suffix)
+invoke: ""

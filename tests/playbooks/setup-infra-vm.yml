@@ -1,0 +1,18 @@
+---
+- name: Setup testing infrastructure with virtual machines
+  hosts: rhtpa_installer_tester
+  become: true
+
+  vars:
+    invoke: infra/vm-provision
+    vm_spec:
+      name: guest
+      memory:
+        size: 8192
+      image: el94.qcow2
+      network:
+        mac: "51:15:42:24:33:22"
+        port: 5432
+
+  roles:
+    - tests

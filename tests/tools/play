@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -eu${_Q:-}o pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+. "${HERE}/common.sh"
+
+function main() (
+    local _workspace="${1:-}"
+    local _playbook="${2:-}"
+    local _ansible_venv
+
+    if [[ -z "${_workspace}" || ! -d "${_workspace}" ]]; then
+        echo "$0: Missing workspace directory" >&2
+        return 1
+    fi
+    if [[ -z "${_playbook}" || ! -f "${_playbook}" ]]; then
+        echo "$0: Missing playbook" >&2
+        return 1
+    fi
+
+    source "$(container_ansible_venv_path "${_workspace}")/bin/activate"
+    export ANSIBLE_CONFIG="$(container_ansible_config_path "${_workspace}")"
+    _Q="${_Q:-}" ansible-playbook "${_playbook}"
+    deactivate
+)
+
+main "$@"
