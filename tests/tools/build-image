@@ -1,0 +1,55 @@
+#!/bin/bash
+
+if [[ -z "${Q:-}" ]]; then
+    _Q=x
+else
+    _Q=""
+fi
+
+set -eu${_Q}o pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+function main() (
+    local _image="${1:-}"
+    local _container="${2:-}"
+    local _force="${FORCE:-2}"
+    local _topdir="$(cd "${HERE}/../.." && pwd -P)"
+
+    if [[ -z "${_image}" ]]; then
+        echo "$0: Missing image name" >&2
+        return 1
+    fi
+    if [[ -z "${_container}" ]]; then
+        echo "$0: Missing container name" >&2
+        return 1
+    fi
+    if [[ "${_force}" != [012] ]]; then
+        echo "$0: FORCE must be a number from 0 to 2 inclusive" >&2
+        return 1
+    fi
+
+    if [[ ${_force} -ge 2 ]]; then
+        if podman container exists "${_container}"; then
+            podman stop "${_container}" || :
+            podman rm "${_container}"
+        fi
+        if podman image exists "${_image}"; then
+            podman rmi "${_image}"
+        fi
+    fi
+
+    if [[ ${_force} -lt 2 ]] && podman image exists "${_image}"; then
+        return 0
+    fi
+
+    cd "${HERE}/../containers"
+    podman build \
+        -t "${_image}" \
+        -f Dockerfile \
+        --build-arg SOURCEDIR="${_topdir##*/}" \
+        --build-arg WORKSPACE="${_container}" \
+        ../..
+)
+
+main "$@"

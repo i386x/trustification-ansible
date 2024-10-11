@@ -1,0 +1,4 @@
+# Ignore all hidden directories here and also in all subdirectories
+.?*/
+# User customization of Makefile variables
+/custom.mk

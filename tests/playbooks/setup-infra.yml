@@ -1,0 +1,24 @@
+---
+- name: Setup testing infrastructure
+  hosts: tester
+  become: true
+  vars_files:
+    - infra-spec.yml
+
+  tasks:
+    - name: Setup infra network
+      ansible.builtin.include_role:
+        name: tests
+      vars:
+        invoke: infra/setup-network
+        network_spec: "{{ __infra_spec.network }}"
+
+    - name: Setup virtual machines
+      ansible.builtin.include_role:
+        name: tests
+      vars:
+        invoke: infra/vm-provision
+        vm_spec: "{{ outer_item }}"
+      loop: "{{ __infra_spec.machines }}"
+      loop_control:
+        loop_var: outer_item

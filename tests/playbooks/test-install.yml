@@ -1,0 +1,7 @@
+---
+- name: Test RHTPA installs on a machine
+  hosts: trustification
+  become: true
+
+  roles:
+    - tpa_single_node

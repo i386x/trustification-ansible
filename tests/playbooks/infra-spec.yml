@@ -1,0 +1,31 @@
+---
+__infra_spec:
+  machines: &machines_ref
+    - name: trustification
+      memory:
+        size: 8192
+      image: el94.qcow2
+      network:
+        name: br_infra
+        mac: "52:54:00:69:56:11"
+        ipv4: "192.168.122.61"
+
+    - name: services
+      memory:
+        size: 8192
+      image: el94.qcow2
+      network:
+        name: br_infra
+        mac: "52:54:00:69:56:12"
+        ipv4: "192.168.122.62"
+
+  network:
+    name: br_infra
+    bridge: virbr1
+    mac: "52:54:00:49:04:a3"
+    ipv4: "192.168.122.2"
+    dhcp:
+      range:
+        - "192.168.122.70"
+        - "192.168.122.254"
+      hosts: *machines_ref

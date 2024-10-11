@@ -1,0 +1,78 @@
+#!/bin/bash
+
+set -eu${_Q:-}o pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+INV_GROUP="${INV_GROUP:-tester}"
+
+. "${HERE}/common.sh"
+
+function main() (
+    local _container="${1:-}"
+    local _workspace="${2:-}"
+    local _force="${FORCE:-0}"
+    local _ansible_venv
+    local _ansible_home
+    local _ansible_inventory
+    local _ansible_config
+
+    if [[ -z "${_container}" ]]; then
+        echo "$0: Missing container name" >&2
+        return 1
+    fi
+    if [[ -z "${_workspace}" ]]; then
+        echo "$0: Missing workspace directory" >&2
+        return 1
+    fi
+
+    _ansible_venv="$(host_ansible_venv_path "${_workspace}")"
+    _ansible_home="$(host_ansible_home_path "${_workspace}")"
+    _ansible_inventory="$(host_ansible_inventory_path "${_workspace}")"
+    _ansible_config="$(host_ansible_config_path "${_workspace}")"
+
+    if [[ ${_force} -ge 1 ]]; then
+        rm -rf "${_ansible_venv}"
+        rm -rf "${_ansible_home}"
+    fi
+
+    mkdir -p "${_ansible_inventory}"
+    cd "${_workspace}"
+
+    if [[ ! -d "${_ansible_venv}" ]]; then
+        mkdir -p "${_ansible_venv}"
+        python3 -m venv "${_ansible_venv}"
+        source "${_ansible_venv}/bin/activate"
+        pip install -U pip
+        pip install ansible
+        pip install libvirt-python
+        deactivate
+    fi
+
+    if [[ ! -s "${_ansible_inventory}/${INV_GROUP}.yml" ]]; then
+        {
+            echo "---"
+            echo "${INV_GROUP}:"
+            echo "  hosts:"
+            echo "    localhost:"
+            echo "      ansible_connection: local"
+            echo "      ansible_python_interpreter: \"$(discover_python_interpreter)\""
+            echo "      tpa_single_node_tests_workspace: \"${_workspace}\""
+        } > "${_ansible_inventory}/${INV_GROUP}.yml"
+    fi
+
+    if [[ ! -s "${_ansible_config}" ]]; then
+        {
+            echo "[defaults]"
+            echo "home = ${_ansible_home}"
+            echo "inventory = ${_ansible_inventory}"
+            echo "roles_path = $(cd ../.. && pwd -P):$(cd ../../roles && pwd -P)"
+        } > "${_ansible_config}"
+    fi
+
+    source "${_ansible_venv}/bin/activate"
+    ANSIBLE_CONFIG="${_ansible_config}" ansible-galaxy collection install \
+        community.libvirt
+    deactivate
+)
+
+main "$@"

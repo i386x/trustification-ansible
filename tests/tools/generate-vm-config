@@ -1,0 +1,131 @@
+#!/bin/bash
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+WORKSPACE="${HERE}/.libvirt"
+CLOUDDIR="${WORKSPACE}/cloud"
+VMNAME="test"
+VMUSER="root"
+VMPASSWORD="admin123456"
+
+. "${HERE}/../files/vmutils.sh"
+
+function usage() {
+    cat <<EOF
+
+Usage: $0 [-f|--force] [-h|--help] <Fedora version>
+
+Options:
+  -f, --force    remove previously generated artifacts (read further to get
+                 more info)
+  -h, --help     print this screen and exit
+
+This script will dump a configuration for a virtual machine consumable with
+libvirt. The configuration is based on a prespecified arguments passed to
+\`virt-install\`. Both the configuration and the output of this script serve
+as a reference for the creating a Jinja template from which the final
+configuration of a virtual machine is generated and passed to libvirt.
+
+As an intermediate step, this script will generate a pair of SSH keys and
+download Fedora QCOW2 image specified by <Fedora version>. These intermediate
+artifacts are stored in \`${WORKSPACE##*/}\` directory besides this script.
+
+Use \`--force\` or \`-f\` to force SSH keys pair to be generated again.
+Use \`--force --force\` or \`-f -f\` or just \`-ff\` to download and generate
+the all of the intermediate artifacts.
+
+EOF
+}
+
+function main() {
+    local _opts
+    local _force=0
+    local _fedora
+    local _image_path
+
+    _opts=$(
+        getopt \
+            --options h,f \
+            --longoptions help,force \
+            --name $0 \
+            -- \
+            "$@"
+    )
+
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+
+    eval set -- "${_opts}"
+
+    while [[ $# -gt 0 ]]; do
+        case "${1:-}" in
+            -f | --force)
+                _force=$(( _force + 1 ))
+                shift
+            ;;
+            -h | --help)
+                usage
+                return 0
+            ;;
+            --)
+                shift
+                if [[ -z "${1:-}" ]]; then
+                    echo "$0: Missing <Fedora version> positional argument" >&2
+                    return 1
+                fi
+                _fedora="${1}"
+                _image_path="${WORKSPACE}/fc${_fedora}.qcow2"
+                break
+            ;;
+            *)
+                echo "$0: Internal error" >&2
+                return 1
+            ;;
+        esac
+    done
+
+    mkdir -p "${WORKSPACE}"
+
+    if [[ ! -f "${_image_path}" || ${_force} -ge 2 ]]; then
+        rm -f "${_image_path}"
+        get_fedora_image "${_fedora}" "${_image_path}"
+    fi
+
+    (
+        cd "${WORKSPACE}"
+        if [[ ! -s ./id_rsa || ! -s ./id_rsa.pub || ${_force} -ge 1 ]]; then
+            rm -f ./id_rsa ./id_rsa.pub
+            genkeys "${VMNAME}" || return $?
+        fi
+        create_cloud_init_metadata \
+            "${CLOUDDIR}" \
+            "${VMUSER}" \
+            "${VMPASSWORD}" \
+            "${PWD}/id_rsa" \
+            "${PWD}/id_rsa.pub"
+    )
+
+    virt-install \
+        --osinfo 'detect=on,require=off' \
+        --connect "qemu:///system" \
+        --name "vm-${VMNAME}" \
+        --memory 4096 \
+        --vcpus '4,sockets=4,cores=1,threads=1' \
+        --cpu host \
+        --clock 'offset=utc,rtc_tickpolicy=catchup' \
+        --import \
+        --cloud-init "meta-data=${CLOUDDIR}/meta-data,user-data=${CLOUDDIR}/user-data" \
+        --disk "${_image_path},snapshot=no" \
+        --graphics none \
+        --noautoconsole \
+        --hvm \
+        --virt-type kvm \
+        --serial "file,path=${WORKSPACE}/guest.log" \
+        --rng builtin \
+        --print-xml \
+        --dry-run
+}
+
+main "$@"
