@@ -6,6 +6,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 INV_GROUP="${INV_GROUP:-tester}"
 
 . "${HERE}/common.sh"
+. "${HERE}/../files/vmutils.sh"
 
 function main() (
     local _container="${1:-}"

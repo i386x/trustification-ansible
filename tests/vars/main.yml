@@ -28,3 +28,11 @@ __tpa_single_node_vm_guest_log: "guest.log"
 
 # Image with a snapshot
 __tpa_single_node_vm_snapshot_image: "snapshot.qcow2"
+
+# Virtual machine maintenance tools shell script name
+__tpa_single_node_vm_tools_sh: "vmtools.sh"
+
+# List of symbolic links to the virtual machine maintenance tools shell script
+__tpa_single_node_vm_tools_sh_links:
+  - vmscp
+  - vmssh

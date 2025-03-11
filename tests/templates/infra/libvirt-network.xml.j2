@@ -6,7 +6,7 @@
   <mac address="{{ __network_spec.mac }}"/>
   <ip address="{{ __network_spec.ipv4 }}" netmask="255.255.255.0">
     <dhcp>
-      <range start="{{ __network_spec.dhcp.range[0] }}" end="{{ __network_spec.dhcp.range[1] }}"/>
+      <range start="{{ __network_spec.dhcp.range.0 }}" end="{{ __network_spec.dhcp.range.1 }}"/>
 {% for host in __network_spec.dhcp.hosts %}
         <host name="{{ host.name | trim }}" mac="{{ host.network.mac | trim }}" ip="{{ host.network.ipv4 | trim }}"/>
 {% endfor %}

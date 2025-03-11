@@ -1,0 +1,25 @@
+---
+# Check that `tpa_single_node_tests_workspace` exists and it is a directory
+
+- name: Check that `tpa_single_node_tests_workspace` is defined
+  ansible.builtin.assert:
+    that:
+      - tpa_single_node_tests_workspace is defined
+      - tpa_single_node_tests_workspace is string
+      - tpa_single_node_tests_workspace | trim | length > 0
+    fail_msg: >-
+      `tpa_single_node_tests_workspace` is not defined or it is not a string or
+      it is blank or empty
+
+- name: Get `tpa_single_node_tests_workspace` stats
+  ansible.builtin.stat:
+    path: "{{ tpa_single_node_tests_workspace | trim }}"
+  register: __result
+
+- name: Check that `tpa_single_node_tests_workspace` is a directory
+  ansible.builtin.assert:
+    that:
+      - __result.stat.isdir is defined
+      - __result.stat.isdir
+    fail_msg: >-
+      `tpa_single_node_tests_workspace` is not a directory

@@ -22,3 +22,10 @@
       loop: "{{ __infra_spec.machines }}"
       loop_control:
         loop_var: outer_item
+
+    - name: Install virtual machine maintenance tools
+      ansible.builtin.include_role:
+        name: tests
+      vars:
+        invoke: infra/install-tools
+        vmtools_spec: "{{ __infra_spec }}"
